@@ -41,7 +41,7 @@ Przykład komendy do uruchomienia modelu Bielik-7B-Instruct w `llama.cpp`:
 - `llama-cli -m <MODEL_FILE>` - model działający w terminalu
 
 przykładowo (dla modelu Bielik-7B-Instruct):
-`llama-server -m ~/Library/Caches/llama.cpp/speakleash_Bielik-7B-Instruct-v0.1-GGUF_bielik-7b-instruct-v0.1.Q4_K_M.gguf`
+`llama-server -m ~/Library/Caches/llama.cpp/speakleash/Bielik-7B-Instruct-v0.1-7B-Instruct-v0.1-GGUF_bielik-7b-instruct-v0.1.Q4_K_M.gguf`
 `llama-cli -m ~/Library/Caches/llama.cpp/speakleash_Bielik-7B-Instruct-v0.1-GGUF_bielik-7b-instruct-v0.1.Q4_K_M.gguf`
 
 ## tool calls

@@ -11,6 +11,8 @@ from google.genai import types
 from dotenv import load_dotenv
 from cli import console
 from .gemini_validation import GeminiConfig
+from .config import GenerationConfig
+from .base_client import BaseLLMClient
 
 class GeminiChatSessionWrapper:
     """
@@ -67,20 +69,21 @@ class GeminiChatSessionWrapper:
         
         return universal_history
 
-class GeminiLLMClient:
+class GeminiLLMClient(BaseLLMClient):
     """
     Encapsulates all Google Gemini AI interactions.
     Provides a clean interface for chat sessions, token counting, and configuration.
     """
     
-    def __init__(self, model_name: str, api_key: str):
+    def __init__(self, model_name: str, api_key: str, default_generation_config: Optional[GenerationConfig] = None):
         """
         Initialize the Gemini LLM client with explicit parameters.
         
         Args:
             model_name: Model to use (e.g., 'gemini-2.5-flash')
             api_key: Google Gemini API key
-        
+            default_generation_config: Default generation configuration for all sessions
+
         Raises:
             ValueError: If api_key is empty or None
         """
@@ -89,7 +92,8 @@ class GeminiLLMClient:
         
         self.model_name = model_name
         self.api_key = api_key
-        
+        self.default_generation_config = default_generation_config if default_generation_config is not None else GenerationConfig.default()
+
         # Initialize the client during construction
         self._client = self._initialize_client()
     
@@ -122,8 +126,17 @@ class GeminiLLMClient:
             gemini_api_key=os.getenv('GEMINI_API_KEY', '')
         )
         
-        return cls(model_name=config.model_name, api_key=config.gemini_api_key)
-    
+        # Load generation config from environment
+        generation_config = GenerationConfig.from_environment("GEMINI")
+
+        console.print_info(f"Konfiguracja generowania Gemini: {generation_config}")
+
+        return cls(
+            model_name=config.model_name,
+            api_key=config.gemini_api_key,
+            default_generation_config=generation_config
+        )
+
     def _initialize_client(self) -> genai.Client:
         """
         Initializes the Google GenAI client.
@@ -143,7 +156,8 @@ class GeminiLLMClient:
     def create_chat_session(self, 
                           system_instruction: str, 
                           history: Optional[List[Dict]] = None,
-                          thinking_budget: int = 0) -> GeminiChatSessionWrapper:
+                          thinking_budget: int = 0,
+                          generation_config: Optional[GenerationConfig] = None) -> GeminiChatSessionWrapper:
         """
         Creates a new chat session with the specified configuration.
         
@@ -151,13 +165,17 @@ class GeminiLLMClient:
             system_instruction: System role/prompt for the assistant
             history: Previous conversation history (optional, in universal dict format)
             thinking_budget: Thinking budget for the model
-            
+            generation_config: Generation configuration (uses default if not provided)
+
         Returns:
             GeminiChatSessionWrapper with universal dictionary-based interface
         """
         if not self._client:
             raise RuntimeError("LLM client not initialized")
         
+        # Use provided config, or fall back to default
+        config = generation_config if generation_config is not None else self.default_generation_config
+
         # Convert universal dict format to Gemini Content objects
         gemini_history = []
         if history:
@@ -171,13 +189,21 @@ class GeminiLLMClient:
                         )
                         gemini_history.append(content)
         
+        # Build generation config for Gemini
+        gemini_config = types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+            temperature=config.temperature,
+            top_p=config.top_p,
+            top_k=config.top_k,
+            max_output_tokens=config.max_tokens,
+            stop_sequences=config.stop_sequences
+        )
+
         gemini_session = self._client.chats.create(
             model=self.model_name,
             history=gemini_history,
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget)
-            )
+            config=gemini_config
         )
         
         return GeminiChatSessionWrapper(gemini_session)
@@ -252,3 +278,7 @@ class GeminiLLMClient:
         This property should be used sparingly and eventually removed.
         """
         return self._client
+
+    def set_default_generation_config(self, config: GenerationConfig) -> None:
+        """Update default generation configuration at runtime."""
+        self.default_generation_config = config

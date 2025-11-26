@@ -16,7 +16,7 @@ logging.basicConfig(format='%(asctime)s : %(levelname)s : %(message)s', level=lo
 # files = CORPORA_FILES["PAN_TADEUSZ"]
 files = CORPORA_FILES["ALL"]
 
-TOKENIZER_FILE = "../tokenizer/tokenizers/custom_bpe_tokenizer.json"
+TOKENIZER_FILE = "../tokenizer/tokenizers/bielik-v1-tokenizer.json"
 # TOKENIZER_FILE = "../tokenizer/tokenizers/bielik-v1-tokenizer.json"
 # TOKENIZER_FILE = "../tokenizer/tokenizers/bielik-v3-tokenizer.json"
 
@@ -25,11 +25,11 @@ OUTPUT_MAP_FILE = "embedding_token_to_index_map.json"
 OUTPUT_MODEL_FILE = "embedding_word2vec_cbow_model.model"
 
 # Parametry treningu Word2Vec (CBOW)
-VECTOR_LENGTH = 20
+VECTOR_LENGTH = 40
 WINDOW_SIZE = 6
 MIN_COUNT = 2         
-WORKERS = 4           
-EPOCHS = 20          
+WORKERS = 8
+EPOCHS = 50
 SAMPLE_RATE = 1e-2
 SG_MODE = 0 # 0 dla CBOW, 1 dla Skip-gram
 

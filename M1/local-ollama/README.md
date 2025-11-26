@@ -14,7 +14,7 @@ przykład (uruchomienie i opcjonalne dociągnięcie modelu):
 `ollama run hf.co/speakleash/Bielik-4.5B-v3.0-Instruct`
 
 tworzenie "custom modelu":
-`ollama create poeta -f ./poeta/Modelfile`
+`ollama create poeta -f ./poeta/Modelf
 
 ## mini-jailbreak
 

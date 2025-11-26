@@ -9,6 +9,8 @@ from llama_cpp import Llama
 from dotenv import load_dotenv
 from cli import console
 from .llama_validation import LlamaConfig
+from .config import GenerationConfig
+from .base_client import BaseLLMClient
 
 class LlamaChatSession:
     """
@@ -16,7 +18,13 @@ class LlamaChatSession:
     Manages conversation history and provides send_message() and get_history() methods.
     """
     
-    def __init__(self, llama_model: Llama, system_instruction: str, history: Optional[List[Dict]] = None):
+    def __init__(
+        self,
+        llama_model: Llama,
+        system_instruction: str,
+        history: Optional[List[Dict]] = None,
+        config: Optional[GenerationConfig] = None
+    ):
         """
         Initialize the LLaMA chat session.
         
@@ -24,11 +32,13 @@ class LlamaChatSession:
             llama_model: Initialized Llama model instance
             system_instruction: System prompt for the assistant
             history: Previous conversation history
+            config: Generation configuration
         """
         self.llama_model = llama_model
         self.system_instruction = system_instruction
         self._history = history or []
-        
+        self.config = config if config is not None else GenerationConfig.default()
+
     def send_message(self, text: str) -> Any:
         """
         Sends a message to the LLaMA model and returns a response object.
@@ -47,12 +57,15 @@ class LlamaChatSession:
         prompt = self._build_prompt_from_history()
         
         try:
-            # Generate response using LLaMA
+            # Generate response using LLaMA with configured parameters
             output = self.llama_model(
                 prompt,
-                max_tokens=512,
+                max_tokens=self.config.max_tokens,
+                temperature=self.config.temperature,
+                top_p=self.config.top_p if self.config.top_p is not None else 0.95,
+                top_k=self.config.top_k if self.config.top_k is not None else 40,
                 stop=["User:", "Assistant:", "\n\nUser:", "\n\nAssistant:"],
-                echo=False,
+                echo=False
             )
             
             response_text = output["choices"][0]["text"].strip()
@@ -121,13 +134,20 @@ class LlamaResponse:
         self.text = text
 
 
-class LlamaClient:
+class LlamaClient(BaseLLMClient):
     """
     Encapsulates all local LLaMA model interactions.
     Provides a clean interface compatible with GeminiLLMClient.
     """
     
-    def __init__(self, model_name: str, model_path: str, n_gpu_layers: int = 1, n_ctx: int = 2048):
+    def __init__(
+        self,
+        model_name: str,
+        model_path: str,
+        n_gpu_layers: int = 1,
+        n_ctx: int = 2048,
+        default_generation_config: Optional[GenerationConfig] = None
+    ):
         """
         Initialize the LLaMA client with explicit parameters.
         
@@ -136,7 +156,8 @@ class LlamaClient:
             model_path: Path to the GGUF model file
             n_gpu_layers: Number of layers to run on GPU
             n_ctx: Maximum context length
-            
+            default_generation_config: Default generation configuration for all sessions
+
         Raises:
             ValueError: If model_path is empty or file doesn't exist
         """
@@ -150,7 +171,8 @@ class LlamaClient:
         self.model_path = model_path
         self.n_gpu_layers = n_gpu_layers
         self.n_ctx = n_ctx
-        
+        self.default_generation_config = default_generation_config if default_generation_config is not None else GenerationConfig.default()
+
         # Initialize the model during construction
         self._llama_model = self._initialize_model()
     
@@ -185,13 +207,18 @@ class LlamaClient:
             llama_context_size=int(os.getenv('LLAMA_CONTEXT_SIZE', '2048'))
         )
         
+        # Load generation config from environment
+        generation_config = GenerationConfig.from_environment("LLAMA")
+
         console.print_info(f"Ładowanie modelu LLaMA z: {config.llama_model_path}")
-        
+        console.print_info(f"Konfiguracja generowania: {generation_config}")
+
         return cls(
             model_name=config.model_name,
             model_path=config.llama_model_path,
             n_gpu_layers=config.llama_gpu_layers,
-            n_ctx=config.llama_context_size
+            n_ctx=config.llama_context_size,
+            default_generation_config=generation_config
         )
     
     def _initialize_model(self) -> Llama:
@@ -222,7 +249,8 @@ class LlamaClient:
     def create_chat_session(self, 
                           system_instruction: str, 
                           history: Optional[List[Dict]] = None,
-                          thinking_budget: int = 0) -> LlamaChatSession:
+                          thinking_budget: int = 0,
+                          generation_config: Optional[GenerationConfig] = None) -> LlamaChatSession:
         """
         Creates a new chat session with the specified configuration.
         
@@ -230,17 +258,22 @@ class LlamaClient:
             system_instruction: System role/prompt for the assistant
             history: Previous conversation history (optional)
             thinking_budget: Ignored for LLaMA (compatibility parameter)
-            
+            generation_config: Generation configuration (uses default if not provided)
+
         Returns:
             LlamaChatSession object
         """
         if not self._llama_model:
             raise RuntimeError("LLaMA model not initialized")
         
+        # Use provided config, or fall back to default
+        config = generation_config if generation_config is not None else self.default_generation_config
+
         return LlamaChatSession(
             llama_model=self._llama_model,
             system_instruction=system_instruction,
-            history=history or []
+            history=history or [],
+            config=config
         )
     
     def count_history_tokens(self, history: List[Dict]) -> int:
@@ -306,3 +339,7 @@ class LlamaClient:
         This property should be used sparingly and eventually removed.
         """
         return self._llama_model
+
+    def set_default_generation_config(self, config: GenerationConfig) -> None:
+        """Update default generation configuration at runtime."""
+        self.default_generation_config = config
