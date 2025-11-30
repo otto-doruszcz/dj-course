@@ -61,6 +61,7 @@ def display_help(session_id: str):
     print_help("  /switch <ID>      - Przełącza na istniejącą sesję.")
     print_help("  /help             - Wyświetla tę pomoc.")
     print_help("  /audio            - Odtwarza ostatnią odpowiedź asystenta jako dźwięk.")
+    print_help("  /all-audio        - Konwertuje całą sesję do jednego pliku audio i go odtwarza.")
     print_help("  /exit, /quit      - Zakończenie czatu.")
     print_help("\n  /session list     - Wyświetla listę dostępnych sesji.")
     print_help("  /session display  - Wyświetla całą historię sesji.")

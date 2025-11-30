@@ -9,3 +9,4 @@ markdown
 openai>=1.0.0
 anthropic>=0.34.0
 coqui-tts
+pydub
