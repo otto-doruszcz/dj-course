@@ -3,7 +3,6 @@ Audio command handler - converts last assistant message to speech and plays it.
 """
 
 import os
-import threading
 from pathlib import Path
 from session import get_session_manager
 from cli import console
@@ -26,7 +25,7 @@ def audio_command() -> None:
     last_assistant_message = None
     for item in reversed(history):
         if 'role' in item and item.get('role', None) == 'model':
-            last_assistant_message = item['parts'][0]['text'] if 'parts' in item else item.get('text')
+            last_assistant_message = extract_message_text(item)
             break
 
     if not last_assistant_message:
@@ -34,9 +33,9 @@ def audio_command() -> None:
         return
 
     # Setup paths
-    speaker_wav_path = _get_speaker_wav_path()
+    speaker_wav_path = get_voice_path("model")
     if not speaker_wav_path:
-        console.print_error("Błąd: Nie znaleziono pliku z nagraniem głosu (voice_user.wav).")
+        console.print_error("Błąd: Nie znaleziono pliku z nagraniem głosu (voice_model.wav).")
         return
 
     output_dir = Path(current_session.session_id) / "audio"
@@ -71,18 +70,25 @@ def audio_command() -> None:
         console.print_error(f"Błąd: {e}")
 
 
-def _get_speaker_wav_path() -> str | None:
+def get_voice_path(voice_type: str) -> str | None:
     """
-    Finds the speaker WAV file reference.
+    Finds the voice WAV file for a given type ('user' or 'model').
     Searches in multiple locations.
 
+    Args:
+        voice_type: Either "user" or "model".
+
     Returns:
-        str: Path to speaker WAV file, or None if not found
+        str: Absolute path to the voice WAV file, or None if not found.
     """
+    if voice_type not in ["user", "model"]:
+        return None
+
+    filename = f"voice_{voice_type}.wav"
+
     possible_paths = [
-        "recorded_voice.wav",  # Current directory
-        os.path.join(os.path.dirname(__file__), "..", "..", "M2", "text-to-speach-xtts", "recorded_voice.wav"),
-        os.path.join(os.path.dirname(__file__), "..", "audio", "recorded_voice.wav"),
+        filename,  # Current directory
+        os.path.join(os.path.dirname(__file__), "..", "audio", filename),
     ]
 
     for path in possible_paths:
@@ -91,3 +97,18 @@ def _get_speaker_wav_path() -> str | None:
 
     return None
 
+
+def extract_message_text(item: any) -> str | None:
+    """
+    Parses a message item from history and extracts the text.
+    Handles both 'parts' format and direct 'text' format.
+    """
+    if 'role' not in item:
+        return None
+
+    if 'parts' in item and item['parts'] and 'text' in item['parts'][0]:
+        return item['parts'][0]['text']
+    elif 'text' in item:
+        return item['text']
+
+    return None
