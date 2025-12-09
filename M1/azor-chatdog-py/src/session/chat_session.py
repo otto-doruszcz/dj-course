@@ -1,12 +1,11 @@
 import uuid
 from typing import List, Any, Union
 import os
-from files import session_files
-from files.wal import append_to_wal
 from llm.gemini_client import GeminiLLMClient
 from llm.llama_client import LlamaClient
 from assistant import Assistant
 from cli import console
+from session.repository import SessionRepository
 
 # Context token limit
 
@@ -23,16 +22,18 @@ class ChatSession:
     Encapsulates session ID, conversation history, assistant, and LLM chat session.
     """
     
-    def __init__(self, assistant: Assistant, session_id: str | None = None, history: List[Any] | None = None):
+    def __init__(self, assistant: Assistant, repository: SessionRepository, session_id: str | None = None, history: List[Any] | None = None):
         """
         Initialize a chat session.
         
         Args:
             assistant: Assistant instance that defines the behavior and model for this session
+            repository: The repository for persistence
             session_id: Unique session identifier. If None, generates a new UUID.
             history: Initial conversation history. If None, starts empty.
         """
         self.assistant = assistant
+        self._repository = repository
         self.session_id = session_id or str(uuid.uuid4())
         self._history = history or []
         self._llm_client: Union[GeminiLLMClient, LlamaClient, None] = None
@@ -66,23 +67,24 @@ class ChatSession:
     
     
     @classmethod
-    def load_from_file(cls, assistant: Assistant, session_id: str) -> tuple['ChatSession | None', str | None]:
+    def load(cls, assistant: Assistant, repository: SessionRepository, session_id: str) -> tuple['ChatSession | None', str | None]:
         """
-        Loads a session from disk.
-        
+        Loads a session using the provided repository.
+
         Args:
             assistant: Assistant instance to use for this session
+            repository: The repository for persistence
             session_id: ID of the session to load
             
         Returns:
             tuple: (ChatSession object or None, error_message or None)
         """
-        history, error = session_files.load_session_history(session_id)
-        
+        history, error = repository.load_history(session_id)
+
         if error:
             return None, error
         
-        session = cls(assistant=assistant, session_id=session_id, history=history)
+        session = cls(assistant=assistant, repository=repository, session_id=session_id, history=history)
         return session, None
     
     def save_to_file(self) -> tuple[bool, str | None]:
@@ -97,8 +99,8 @@ class ChatSession:
         if self._llm_chat_session:
             self._history = self._llm_chat_session.get_history()
         
-        return session_files.save_session_history(
-            self.session_id, 
+        return self._repository.save_history(
+            self.session_id,
             self._history, 
             self.assistant.system_prompt, 
             self._llm_client.get_model_name()
@@ -125,7 +127,7 @@ class ChatSession:
         
         # Log to WAL
         total_tokens = self.count_tokens()
-        success, error = append_to_wal(
+        success, error = self._repository.append_to_wal(
             session_id=self.session_id,
             prompt=text,
             response_text=response.text,

@@ -1,7 +1,7 @@
 from cli import console
 from .chat_session import ChatSession
 from assistant import create_azor_assistant
-from files import session_files
+from persistence.filesystem_repository import FileSystemSessionRepository
 
 
 class SessionManager:
@@ -13,7 +13,8 @@ class SessionManager:
     def __init__(self):
         """Initializes with no active session."""
         self._current_session: ChatSession | None = None
-    
+        self._repository = FileSystemSessionRepository()
+
     def get_current_session(self) -> ChatSession:
         """
         Returns the current active session.
@@ -57,7 +58,7 @@ class SessionManager:
         
         # Create new session
         assistant = create_azor_assistant()
-        new_session = ChatSession(assistant=assistant)
+        new_session = ChatSession(assistant=assistant, repository=self._repository)
         self._current_session = new_session
         
         return new_session, save_attempted, previous_session_id, save_error
@@ -90,8 +91,8 @@ class SessionManager:
         
         # Load new session
         assistant = create_azor_assistant()
-        new_session, error = ChatSession.load_from_file(assistant=assistant, session_id=session_id)
-        
+        new_session, error = ChatSession.load(assistant=assistant, repository=self._repository, session_id=session_id)
+
         if error:
             # Failed to load - don't change current session
             return None, save_attempted, previous_session_id, False, error, False
@@ -116,11 +117,11 @@ class SessionManager:
         removed_session_id = self._current_session.session_id
         
         # Remove the session file
-        remove_success, remove_error = session_files.remove_session_file(removed_session_id)
+        remove_success, remove_error = self._repository.remove_session_file(removed_session_id)
 
         # Create a new session regardless of whether the file was successfully removed
         assistant = create_azor_assistant()
-        new_session = ChatSession(assistant=assistant)
+        new_session = ChatSession(assistant=assistant, repository=self._repository)
         self._current_session = new_session
 
         return new_session, removed_session_id, remove_success, remove_error
@@ -138,12 +139,12 @@ class SessionManager:
         """
         if cli_session_id:
             assistant = create_azor_assistant()
-            session, error = ChatSession.load_from_file(assistant=assistant, session_id=cli_session_id)
-            
+            session, error = ChatSession.load(assistant=assistant, repository=self._repository, session_id=cli_session_id)
+
             if error:
                 console.print_error(error)
                 # Fallback to new session
-                session = ChatSession(assistant=assistant)
+                session = ChatSession(assistant=assistant, repository=self._repository)
                 console.print_info(f"Rozpoczęto nową sesję z ID: {session.session_id}")
             
             self._current_session = session
@@ -155,7 +156,7 @@ class SessionManager:
         else:
             print("Rozpoczynanie nowej sesji.")
             assistant = create_azor_assistant()
-            session = ChatSession(assistant=assistant)
+            session = ChatSession(assistant=assistant, repository=self._repository)
             self._current_session = session
             console.display_help(session.session_id)
         

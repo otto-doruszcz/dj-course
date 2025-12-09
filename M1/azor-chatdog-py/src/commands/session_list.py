@@ -1,9 +1,14 @@
-from files import session_files
+from session.repository import SessionRepository
 from cli import console
 
-def list_sessions_command():
-    """Displays a formatted list of available sessions."""
-    sessions = session_files.list_sessions()
+def list_sessions_command(repository: SessionRepository):
+    """
+    Displays a formatted list of available sessions using the provided repository.
+
+    Args:
+        repository: An object that implements the SessionRepository protocol.
+    """
+    sessions = repository.list_sessions()
     if sessions:
         console.print_help("\n--- Dostępne zapisane sesje (ID) ---")
         for session in sessions:
