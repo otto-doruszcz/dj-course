@@ -1,4 +1,4 @@
-from session import get_session_manager
+from session import get_session_manager, get_repository
 from cli import console
 from commands.session_list import list_sessions_command
 from commands.session_display import display_full_session
@@ -89,8 +89,8 @@ def handle_session_subcommand(subcommand: str, manager):
     current = manager.get_current_session()
     
     if subcommand == 'list':
-        list_sessions_command()
-        
+        list_sessions_command(get_repository())
+
     elif subcommand == 'display':
         display_full_session(current.get_history(), current.session_id, current.assistant_name)
         

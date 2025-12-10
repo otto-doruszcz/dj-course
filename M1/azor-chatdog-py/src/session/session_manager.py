@@ -1,7 +1,7 @@
 from cli import console
 from .chat_session import ChatSession
 from assistant import create_azor_assistant
-from persistence.filesystem_repository import FileSystemSessionRepository
+from .repository import SessionRepository
 
 
 class SessionManager:
@@ -10,10 +10,15 @@ class SessionManager:
     Provides high-level operations for session management.
     """
     
-    def __init__(self):
-        """Initializes with no active session."""
+    def __init__(self, repository: SessionRepository):
+        """
+        Initializes with a session repository.
+
+        Args:
+            repository: An object that implements the SessionRepository protocol.
+        """
         self._current_session: ChatSession | None = None
-        self._repository = FileSystemSessionRepository()
+        self._repository = repository
 
     def get_current_session(self) -> ChatSession:
         """
