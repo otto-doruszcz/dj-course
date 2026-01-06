@@ -38,11 +38,12 @@ def main_loop():
             
             # Conversation with the model
             session = manager.get_current_session()
-            
+
+
             # Send message (handles WAL logging internally)
             response = session.send_message(user_input)
             
-            # Get token information
+            # Get token  information
             total_tokens, remaining_tokens, max_tokens = session.get_token_info()
 
             # Display response

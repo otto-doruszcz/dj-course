@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Any, Union
+from typing import List, Any, Union, Callable
 import os
 from llm.gemini_client import GeminiLLMClient
 from llm.llama_client import LlamaClient
@@ -21,8 +21,9 @@ class ChatSession:
     Manages everything related to a single chat session.
     Encapsulates session ID, conversation history, assistant, and LLM chat session.
     """
-    
-    def __init__(self, assistant: Assistant, repository: SessionRepository, session_id: str | None = None, history: List[Any] | None = None):
+
+    def __init__(self, assistant: Assistant, repository: SessionRepository, session_id: str | None = None,
+                 history: List[Any] | None = None, title: str = "", summarizer: Callable[[str], str] | None = None):
         """
         Initialize a chat session.
         
@@ -31,6 +32,8 @@ class ChatSession:
             repository: The repository for persistence
             session_id: Unique session identifier. If None, generates a new UUID.
             history: Initial conversation history. If None, starts empty.
+            title: Optional session title (summary of first prompt)
+            summarizer: Optional callable for summarizing prompt
         """
         self.assistant = assistant
         self._repository = repository
@@ -39,8 +42,46 @@ class ChatSession:
         self._llm_client: Union[GeminiLLMClient, LlamaClient, None] = None
         self._llm_chat_session = None
         self._max_context_tokens = 32768
+        self._title = title
+        self._summarizer = summarizer
         self._initialize_llm_session()
-    
+
+    @property
+    def title(self) -> str:
+        return self._title
+
+    @title.setter
+    def title(self, value: str):
+        self._title = value
+
+    def set_title_from_prompt(self, prompt: str, summarizer: Callable[[str], str] | None = None, min_words: int = 3, max_words: int = 8):
+        """
+        Sets the session title as a summary of the first user prompt.
+        If the prompt is empty, does nothing. If short, uses the whole prompt.
+        Allows per-session custom summarizer.
+        """
+
+        if self._title:
+            return  # Title already set
+        prompt = (prompt or '').strip()
+        if not prompt:
+            return  # Do not set title for empty prompt
+        words = prompt.split()
+        if len(words) <= min_words:
+            self._title = prompt
+        else:
+            summarizer = summarizer or self._summarizer or self._default_summarizer
+            self._title = summarizer(prompt, max_words=max_words)
+
+
+    @staticmethod
+    def _default_summarizer(prompt: str, max_words: int = 8) -> str:
+        words = prompt.strip().split()
+        summary = " ".join(words[:max_words])
+        if len(words) > max_words:
+            summary += "..."
+        return summary
+
     def _initialize_llm_session(self):
         """
         Creates or recreates the LLM chat session with current history.
@@ -51,23 +92,23 @@ class ChatSession:
         if engine not in ENGINE_MAPPING:
             valid_engines = ', '.join(ENGINE_MAPPING.keys())
             raise ValueError(f"ENGINE musi być jedną z wartości: {valid_engines}, otrzymano: {engine}")
-        
+
         # Initialize LLM client if not already created
         if self._llm_client is None:
             SelectedClientClass = ENGINE_MAPPING.get(engine, GeminiLLMClient)
             console.print_info(SelectedClientClass.preparing_for_use_message())
             self._llm_client = SelectedClientClass.from_environment()
             console.print_info(self._llm_client.ready_for_use_message())
-        
+
         self._llm_chat_session = self._llm_client.create_chat_session(
             system_instruction=self.assistant.system_prompt,
             history=self._history,
             thinking_budget=0
         )
-    
-    
+
     @classmethod
-    def load(cls, assistant: Assistant, repository: SessionRepository, session_id: str) -> tuple['ChatSession | None', str | None]:
+    def load(cls, assistant: Assistant, repository: SessionRepository, session_id: str) -> tuple[
+        'ChatSession | None', str | None]:
         """
         Loads a session using the provided repository.
 
@@ -79,14 +120,20 @@ class ChatSession:
         Returns:
             tuple: (ChatSession object or None, error_message or None)
         """
+        # Try to load title if present in repository (backward compatible)
         history, error = repository.load_history(session_id)
-
+        title = ""
+        if hasattr(repository, 'load_title'):
+            try:
+                title = repository.load_title(session_id) or ""
+            except Exception:
+                title = ""
         if error:
             return None, error
-        
-        session = cls(assistant=assistant, repository=repository, session_id=session_id, history=history)
+
+        session = cls(assistant=assistant, repository=repository, session_id=session_id, history=history, title=title)
         return session, None
-    
+
     def save_to_file(self) -> tuple[bool, str | None]:
         """
         Saves this session to disk.
@@ -98,14 +145,21 @@ class ChatSession:
         # Sync history from LLM session before saving
         if self._llm_chat_session:
             self._history = self._llm_chat_session.get_history()
-        
+
+        # Save title if repository supports it
+        if hasattr(self._repository, 'save_title'):
+            try:
+                self._repository.save_title(self.session_id, self._title)
+            except Exception:
+                pass
+
         return self._repository.save_history(
             self.session_id,
-            self._history, 
-            self.assistant.system_prompt, 
+            self._history,
+            self.assistant.system_prompt,
             self._llm_client.get_model_name()
         )
-    
+
     def send_message(self, text: str):
         """
         Sends a message to the LLM and returns the response.
@@ -119,12 +173,12 @@ class ChatSession:
         """
         if not self._llm_chat_session:
             raise RuntimeError("LLM session not initialized")
-        
+
         response = self._llm_chat_session.send_message(text)
-        
+
         # Sync history after message
         self._history = self._llm_chat_session.get_history()
-        
+
         # Log to WAL
         total_tokens = self.count_tokens()
         success, error = self._repository.append_to_wal(
@@ -134,83 +188,85 @@ class ChatSession:
             total_tokens=total_tokens,
             model_name=self._llm_client.get_model_name()
         )
-        
+
         if not success and error:
             # We don't want to fail the entire message sending because of WAL issues
             # Just log the error to stderr or similar - but for now we'll silently continue
             pass
-        
+
+        self.set_title_from_prompt(text, self._default_summarizer)
+
         return response
-    
+
     def get_history(self) -> List[Any]:
         """Returns the current conversation history."""
         # Always sync from LLM session to ensure consistency
         if self._llm_chat_session:
             self._history = self._llm_chat_session.get_history()
         return self._history
-    
+
     def clear_history(self):
         """Clears all conversation history and reinitializes the LLM session."""
         self._history = []
         self._initialize_llm_session()
         self.save_to_file()
-    
+
     def pop_last_exchange(self) -> bool:
         """
         Removes the last user-assistant exchange from history.
-        
+
         Returns:
             bool: True if successful, False if insufficient history
         """
         current_history = self.get_history()
-        
+
         if len(current_history) < 2:
             return False
-        
+
         # Remove last 2 entries (user + assistant)
         self._history = current_history[:-2]
-        
+
         # Reinitialize LLM session with modified history
         self._initialize_llm_session()
-        
+
         self.save_to_file()
-        
+
         return True
-    
+
     def count_tokens(self) -> int:
         """
         Counts total tokens in the conversation history.
-        
+
         Returns:
             int: Total token count
         """
         if not self._llm_client:
             return 0
         return self._llm_client.count_history_tokens(self._history)
-    
+
     def is_empty(self) -> bool:
         """
         Checks if session has any complete exchanges.
-        
+
         Returns:
             bool: True if history has less than 2 entries
         """
         return len(self._history) < 2
-    
+
     def get_remaining_tokens(self) -> int:
         """
         Calculates remaining tokens based on context limit.
-        
+
         Returns:
             int: Remaining token count
         """
         total = self.count_tokens()
         return self._max_context_tokens - total
-    
+
     def get_token_info(self) -> tuple[int, int, int]:
         """
         Gets comprehensive token information for this session.
-        
+
         Returns:
             tuple: (total_tokens, remaining_tokens, max_tokens)
         """
@@ -218,12 +274,12 @@ class ChatSession:
         remaining_tokens = self._max_context_tokens - total_tokens
         max_tokens = self._max_context_tokens
         return total_tokens, remaining_tokens, max_tokens
-    
+
     @property
     def assistant_name(self) -> str:
         """
         Gets the display name of the assistant.
-        
+
         Returns:
             str: The assistant's display name
         """
